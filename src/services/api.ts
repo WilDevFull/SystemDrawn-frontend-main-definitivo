@@ -1,12 +1,12 @@
 import { useAuthStore } from '@/store/authstore';
 import axios from 'axios';
 
-export const api =
-  axios.create({
-    baseURL:
-      'https://system-drawn-backend-smoky.vercel.app',
-    timeout: 15000,
-  });
+export const api = axios.create({
+  
+ 
+  baseURL: 'http://localhost:3000',
+  timeout: 90000, 
+});
 
 const publicAuthEndpoints = new Set([
   '/auth/login',
