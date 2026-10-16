@@ -1,7 +1,7 @@
 // src/pages/user/artes.tsx
 import { useRouter } from '@/lib/navigation';
-import { simularTatuagemIA } from '@/services/simulacao.service';
-import React, { useState } from 'react';
+import { MEMBROS, simularTatuagemIA, type Membro } from '@/services/simulacao.service';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -17,14 +17,25 @@ export default function ArtesScreen() {
   const router = useRouter();
 
   const [imagemOriginal, setImagemOriginal] = useState<string | null>(null);
-  const [promptText, setPromptText] = useState<string>(
-    'photorealistic black ink tattoo applied on human skin, high quality'
-  );
+  const [membro, setMembro] = useState<Membro>('Braço');
+  const [promptText, setPromptText] = useState<string>('black ink tattoo');
   const [imagemSimulada, setImagemSimulada] = useState<string | null>(null);
+  const [modoTeste, setModoTeste] = useState<boolean>(false);
   const [carregando, setCarregando] = useState<boolean>(false);
   const [mensagemErro, setMensagemErro] = useState<string | null>(null);
 
-  // 1. Redimensiona a foto no navegador (máx 768px) e converte para Base64 leve
+  // Cada pedido ganha um número; uma resposta atrasada de um pedido antigo é ignorada.
+  const pedidoAtual = useRef(0);
+  const resultadoRef = useRef<any>(null);
+
+  // No celular o resultado aparece abaixo da tela; rola até ele quando fica pronto.
+  useEffect(() => {
+    if (imagemSimulada) {
+      resultadoRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    }
+  }, [imagemSimulada]);
+
+  // 1. Redimensiona o desenho no navegador (máx 768px) e converte para Base64 leve
   const processarImagemWeb = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -37,11 +48,16 @@ export default function ArtesScreen() {
           let width = img.width;
           let height = img.height;
 
+          if (!width || !height) {
+            reject(new Error('Imagem sem tamanho.'));
+            return;
+          }
+
           if (width > height && width > MAX_SIZE) {
-            height = Math.round((height * MAX_SIZE) / width);
+            height = Math.max(1, Math.round((height * MAX_SIZE) / width));
             width = MAX_SIZE;
           } else if (height > MAX_SIZE) {
-            width = Math.round((width * MAX_SIZE) / height);
+            width = Math.max(1, Math.round((width * MAX_SIZE) / height));
             height = MAX_SIZE;
           }
 
@@ -49,7 +65,16 @@ export default function ArtesScreen() {
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
-          ctx?.drawImage(img, 0, 0, width, height);
+          if (!ctx) {
+            reject(new Error('Erro ao processar a imagem.'));
+            return;
+          }
+
+          // O JPEG não tem transparência: sem este fundo branco, o fundo
+          // transparente do desenho viraria um quadrado preto.
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
 
           const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
           resolve(dataUrl);
@@ -73,6 +98,9 @@ export default function ArtesScreen() {
 
       try {
         const base64Otimizado = await processarImagemWeb(file);
+        // Um pedido que ainda esteja em andamento era do desenho antigo: é descartado.
+        pedidoAtual.current++;
+        setCarregando(false);
         setImagemOriginal(base64Otimizado);
         setImagemSimulada(null);
       } catch {
@@ -83,33 +111,53 @@ export default function ArtesScreen() {
     input.click();
   };
 
-  // 3. Envia para o Backend (/simulacao)
+  // 3. Troca o membro; o resultado antigo era de outro membro, então sai da tela
+  const handleEscolherMembro = (item: Membro) => {
+    if (item === membro) return;
+    pedidoAtual.current++;
+    setMembro(item);
+    setImagemSimulada(null);
+    setMensagemErro(null);
+  };
+
+  // 4. Envia para o Backend (/simulacao)
   const handleSimular = async () => {
     if (!imagemOriginal) {
-      setMensagemErro('Por favor, selecione uma foto do corpo ou rascunho primeiro.');
+      setMensagemErro('Por favor, selecione o desenho da tatuagem primeiro.');
       return;
     }
+
+    const id = ++pedidoAtual.current;
 
     try {
       setCarregando(true);
       setMensagemErro(null);
+      setImagemSimulada(null);
 
-      const resposta = await simularTatuagemIA(imagemOriginal, promptText);
+      const resposta = await simularTatuagemIA(imagemOriginal, membro, promptText);
+      if (id !== pedidoAtual.current) return;
 
       if (resposta.sucesso && resposta.imagemSimulada) {
         setImagemSimulada(resposta.imagemSimulada);
+        setModoTeste(Boolean(resposta.modoTeste));
       } else {
         setMensagemErro(resposta.erro || 'A IA não conseguiu gerar a simulação.');
       }
     } catch (error: any) {
-      console.error('Erro ao conectar com o backend:', error);
-      const msgServidor = error?.response?.data?.erro;
-      setMensagemErro(
-        msgServidor ||
-          'Erro ao conectar com o servidor. Verifique se o seu Backend está rodando na porta 3000.'
-      );
+      if (id !== pedidoAtual.current) return;
+      console.error('Erro ao conectar com o backend (porta 3000):', error);
+      // A rota de simulação responde com "erro"; o limite de pedidos e outros erros, com "message".
+      const msgServidor = error?.response?.data?.erro || error?.response?.data?.message;
+
+      if (msgServidor) {
+        setMensagemErro(msgServidor);
+      } else if (error?.code === 'ECONNABORTED') {
+        setMensagemErro('A IA demorou demais para responder. Tente novamente em instantes.');
+      } else {
+        setMensagemErro('Não foi possível falar com o servidor agora. Tente novamente em instantes.');
+      }
     } finally {
-      setCarregando(false);
+      if (id === pedidoAtual.current) setCarregando(false);
     }
   };
 
@@ -119,40 +167,77 @@ export default function ArtesScreen() {
         <Text style={styles.eyebrow}>Inteligência Artificial • ControlNet</Text>
         <Text style={styles.title}>Simulador de Tatuagem</Text>
         <Text style={styles.description}>
-          Envie uma foto da região do corpo ou do desenho base (rascunho) e descreva o estilo desejado para simular o resultado com IA.
+          Envie o desenho da tatuagem que você quer, escolha onde no corpo e veja uma prévia de como ela ficaria.
         </Text>
 
-        {/* PASSO 1: ESCOLHER IMAGEM */}
-        <TouchableOpacity style={styles.uploadButton} onPress={handleSelecionarFoto}>
+        {/* PASSO 1: ESCOLHER O DESENHO */}
+        <TouchableOpacity
+          style={[styles.uploadButton, carregando && styles.buttonDisabled]}
+          onPress={handleSelecionarFoto}
+          disabled={carregando}
+        >
           <Text style={styles.uploadButtonText}>
-            {imagemOriginal ? 'Trocar Imagem Base' : '1. Selecionar Foto / Rascunho'}
+            {imagemOriginal ? '1. Trocar desenho' : '1. Selecionar desenho da tatuagem'}
           </Text>
         </TouchableOpacity>
+        <Text style={styles.hint}>
+          Dica: desenhos com fundo branco ou transparente ficam melhores.
+        </Text>
 
-        {/* PASSO 2: DESCREVER O PROMPT */}
+        {/* PASSO 2: ESCOLHER O MEMBRO */}
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>2. Onde no corpo?</Text>
+          <View style={styles.membrosRow}>
+            {MEMBROS.map((item) => {
+              const selecionado = membro === item;
+              return (
+                <TouchableOpacity
+                  key={item}
+                  style={[
+                    styles.membroOption,
+                    selecionado && styles.membroSelected,
+                    carregando && styles.buttonDisabled,
+                  ]}
+                  onPress={() => handleEscolherMembro(item)}
+                  disabled={carregando}
+                  role="button"
+                  aria-pressed={selecionado}
+                >
+                  <Text style={[styles.membroText, selecionado && styles.membroTextSelected]}>
+                    {selecionado ? `✓ ${item}` : item}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* PASSO 3: DESCREVER O ESTILO */}
         <View style={styles.inputGroup}>
           <Text style={styles.label}>
-            2. Descrição da Tatuagem (em inglês gera melhores resultados):
+            3. Estilo da tatuagem (opcional, em inglês gera melhores resultados):
           </Text>
           <TextInput
             style={styles.input}
             value={promptText}
             onChangeText={setPromptText}
-            placeholder="Ex: blackwork floral tattoo on human skin"
+            editable={!carregando}
+            aria-label="Estilo da tatuagem"
+            placeholder="Ex: blackwork floral tattoo, fine line"
             placeholderTextColor="#666"
           />
         </View>
 
         {/* AVISO DE ERRO */}
         {mensagemErro && (
-          <View style={styles.errorBox}>
+          <View style={styles.errorBox} role="alert">
             <Text style={styles.errorText}>{mensagemErro}</Text>
           </View>
         )}
 
-        {/* PASSO 3: BOTÃO DE SIMULAR */}
+        {/* PASSO 4: BOTÃO DE SIMULAR */}
         <TouchableOpacity
-          style={[styles.button, (!imagemOriginal || carregando) && styles.buttonDisabled]}
+          style={[styles.button, !imagemOriginal && styles.buttonDisabled]}
           onPress={handleSimular}
           disabled={!imagemOriginal || carregando}
         >
@@ -160,11 +245,11 @@ export default function ArtesScreen() {
             <View style={styles.loadingRow}>
               <ActivityIndicator color="#FFF" />
               <Text style={styles.buttonText}>
-                Processando no Hugging Face (pode levar 20s)...
+                Gerando a simulação (pode levar até 2 minutos)...
               </Text>
             </View>
           ) : (
-            <Text style={styles.buttonText}>3. Gerar Simulação com IA</Text>
+            <Text style={styles.buttonText}>4. Gerar simulação em: {membro}</Text>
           )}
         </TouchableOpacity>
 
@@ -173,9 +258,10 @@ export default function ArtesScreen() {
           <View style={styles.resultsGrid}>
             {imagemOriginal && (
               <View style={styles.imageBox}>
-                <Text style={styles.imageTitle}>Imagem Enviada:</Text>
+                <Text style={styles.imageTitle}>Seu desenho:</Text>
                 <Image
                   source={{ uri: imagemOriginal }}
+                  aria-label="Desenho enviado"
                   style={styles.previewImage}
                   resizeMode="contain"
                 />
@@ -183,13 +269,21 @@ export default function ArtesScreen() {
             )}
 
             {imagemSimulada && (
-              <View style={styles.imageBox}>
-                <Text style={styles.imageTitle}>Resultado da IA:</Text>
+              <View style={styles.imageBox} ref={resultadoRef}>
+                <Text style={styles.imageTitle}>
+                  {modoTeste ? `Prévia em: ${membro} (modo de teste)` : `Resultado da IA em: ${membro}`}
+                </Text>
                 <Image
                   source={{ uri: imagemSimulada }}
+                  aria-label={`Simulação da tatuagem em: ${membro}`}
                   style={styles.previewImage}
                   resizeMode="contain"
                 />
+                {modoTeste && (
+                  <Text style={styles.testNotice}>
+                    Modo de teste: esta imagem é só o desenho colado na foto, sem a IA.
+                  </Text>
+                )}
               </View>
             )}
           </View>
@@ -251,12 +345,17 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 22,
     alignItems: 'center',
-    marginBottom: 22,
+    marginBottom: 8,
   },
   uploadButtonText: {
     color: '#FFF',
     fontWeight: '700',
     fontSize: 14,
+  },
+  hint: {
+    color: '#8A8590',
+    fontSize: 13,
+    marginBottom: 22,
   },
   inputGroup: {
     marginBottom: 22,
@@ -266,6 +365,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: 8,
     fontWeight: '600',
+  },
+  membrosRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  membroOption: {
+    backgroundColor: '#17171B',
+    borderWidth: 1,
+    borderColor: '#302E35',
+    borderRadius: 5,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+  },
+  membroSelected: {
+    backgroundColor: '#2A1B3D',
+    borderColor: '#A855F7',
+  },
+  membroText: {
+    color: '#C4BFCA',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  membroTextSelected: {
+    color: '#FFF',
   },
   input: {
     backgroundColor: '#111114',
@@ -339,6 +463,12 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 320,
     borderRadius: 5,
+  },
+  testNotice: {
+    color: '#FBBF24',
+    fontSize: 13,
+    marginTop: 12,
+    textAlign: 'center',
   },
   secondaryButton: {
     borderWidth: 1,
