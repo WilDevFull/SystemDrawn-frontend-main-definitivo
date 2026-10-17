@@ -1,6 +1,6 @@
 # SystemDrawn Frontend
 
-Site do projeto **SystemDrawn**, desenvolvido em **React + Vite + TypeScript**, responsável pela interface web e pela integração com a API Backend para gerenciamento de agendamentos de **tatuagem** e **piercing**.
+Site do projeto **SystemDrawn**, desenvolvido em **React + Vite + TypeScript**, responsável pela interface web e pela integração com a API Backend para gerenciamento de agendamentos de **tatuagem** e **piercing**, além da **simulação de tatuagem com Inteligência Artificial**.
 
 > O projeto começou como aplicativo mobile (React Native + Expo) e foi migrado para web. O app nativo e a configuração do Expo foram removidos.
 
@@ -66,6 +66,40 @@ O login de administrador fica no menu **Login** do cabeçalho ("Sou cliente" / "
 
 - Escolha do tipo de piercing, joia, data e horário
 - Confirmação do agendamento via API
+
+## Simulação de Tatuagem com IA
+
+Tela **Artes** (rota `/artes`, requer login). O cliente envia o desenho da tatuagem que quer, escolhe onde no corpo e vê uma foto realista desse membro já tatuado, gerada por Inteligência Artificial (**ControlNet** do **Hugging Face**).
+
+### Como o cliente usa, passo a passo
+
+1. **Seleciona o desenho.** Clica em **"1. Selecionar desenho da tatuagem"** e escolhe uma imagem do computador ou do celular.
+2. **Escolhe o membro do corpo.** São 6 botões: **Braço, Perna, Costas, Peito, Pescoço e Mão** (os mesmos da tela de agendamento). O botão escolhido fica roxo e com um ✓.
+3. **Descreve o estilo (opcional).** O campo **Estilo** já vem com `black ink tattoo` (tatuagem em tinta preta). Em inglês o resultado fica melhor. Para uma tatuagem colorida, escreva as cores aqui, por exemplo `colorful watercolor tattoo, red and blue`.
+4. **Clica em "4. Gerar simulação em: (membro)".** Enquanto a IA trabalha, o botão mostra "Gerando a simulação (pode levar até 2 minutos)..." e os outros botões ficam travados.
+5. **Vê o resultado.** O site mostra lado a lado o **"Seu desenho"** e o **"Resultado da IA em: (membro)"**. Se o resultado ficar fora da tela (como no celular), a página rola sozinha até ele.
+
+Depois disso, o botão **"Ir para Agendamento"** leva o cliente para agendar a tatuagem.
+
+### O que o site faz por trás
+
+- **Diminui o desenho antes de enviar:** a imagem é reduzida para no máximo 768 px e convertida para JPEG, para o envio ficar leve. Se o desenho tiver fundo transparente, esse fundo vira branco (senão viraria um quadrado preto).
+- **Envia para o backend:** chama `POST /simulacao` com o desenho (`imagemTatuagemBase64`), o membro (`membro`) e o estilo (`promptText`). Toda a parte da IA acontece no backend: ele tira o fundo do desenho, encaixa o desenho na foto base do membro e chama o ControlNet. A explicação completa está no README do backend.
+- **Espera até 150 segundos:** a simulação pode demorar, então essa chamada espera mais que os 90 segundos das outras chamadas da API.
+- **Mostra erros claros:** se algo der errado, aparece uma caixa vermelha com a mensagem do backend (por exemplo, "O limite gratuito da IA acabou por hoje") ou um aviso de que a IA demorou demais ou de que o servidor não respondeu.
+- **Evita resultados trocados:** se o cliente troca o desenho ou o membro, o resultado antigo sai da tela, e uma resposta atrasada de um pedido antigo é ignorada.
+
+### Arquivos da funcionalidade
+
+| Arquivo | O que faz |
+|---------|-----------|
+| `src/pages/user/artes.tsx` | Tela Artes: escolha do desenho, do membro e do estilo, e exibição do resultado |
+| `src/services/simulacao.service.ts` | Lista dos 6 membros e chamada `POST /simulacao` ao backend |
+
+### Para funcionar
+
+- O **backend** precisa estar rodando (`npm run dev` na pasta do backend) com o token do Hugging Face (`HUGGINGFACE_API_KEY`) no `.env` dele.
+- A conta gratuita do Hugging Face permite aproximadamente **10 simulações por dia**. Quando o limite acaba, o site mostra o aviso e é preciso esperar o dia seguinte.
 
 ## Meus Agendamentos
 
@@ -169,6 +203,7 @@ A pasta `dist/`, gerada por `npm run build`, contém arquivos estáticos que pod
 
 - Datas de agendamento são tratadas como datas civis (`YYYY-MM-DD`) em `src/utils/civilDate.ts`, sem conversão de fuso horário.
 - A sessão (usuário, token e perfil) é guardada no `localStorage` na chave `systemdrawn-auth`. Respostas `401` da API encerram a sessão.
+- As chamadas à API esperam no máximo 90 segundos (`src/services/api.ts`). A simulação de tatuagem com IA é a exceção: espera até 150 segundos (`src/services/simulacao.service.ts`).
 - A proteção das rotas de administrador existe apenas na interface; o backend precisa validar o perfil.
 - As telas de agendamento ainda usam componentes do React Native Web. A conversão para HTML/CSS puro é uma etapa futura.
 - A anamnese ainda não existe.

@@ -24,18 +24,18 @@ export default function ArtesScreen() {
   const [carregando, setCarregando] = useState<boolean>(false);
   const [mensagemErro, setMensagemErro] = useState<string | null>(null);
 
-  // Cada pedido ganha um número; uma resposta atrasada de um pedido antigo é ignorada.
+  
   const pedidoAtual = useRef(0);
   const resultadoRef = useRef<any>(null);
 
-  // No celular o resultado aparece abaixo da tela; rola até ele quando fica pronto.
+  
   useEffect(() => {
     if (imagemSimulada) {
       resultadoRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
     }
   }, [imagemSimulada]);
 
-  // 1. Redimensiona o desenho no navegador (máx 768px) e converte para Base64 leve
+  
   const processarImagemWeb = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -70,8 +70,8 @@ export default function ArtesScreen() {
             return;
           }
 
-          // O JPEG não tem transparência: sem este fundo branco, o fundo
-          // transparente do desenho viraria um quadrado preto.
+          
+          
           ctx.fillStyle = '#FFFFFF';
           ctx.fillRect(0, 0, width, height);
           ctx.drawImage(img, 0, 0, width, height);
@@ -85,7 +85,7 @@ export default function ArtesScreen() {
     });
   };
 
-  // 2. Abre o seletor de arquivos do navegador
+  
   const handleSelecionarFoto = () => {
     setMensagemErro(null);
     const input = document.createElement('input');
@@ -111,7 +111,7 @@ export default function ArtesScreen() {
     input.click();
   };
 
-  // 3. Troca o membro; o resultado antigo era de outro membro, então sai da tela
+  
   const handleEscolherMembro = (item: Membro) => {
     if (item === membro) return;
     pedidoAtual.current++;
@@ -120,7 +120,7 @@ export default function ArtesScreen() {
     setMensagemErro(null);
   };
 
-  // 4. Envia para o Backend (/simulacao)
+  
   const handleSimular = async () => {
     if (!imagemOriginal) {
       setMensagemErro('Por favor, selecione o desenho da tatuagem primeiro.');
@@ -146,7 +146,7 @@ export default function ArtesScreen() {
     } catch (error: any) {
       if (id !== pedidoAtual.current) return;
       console.error('Erro ao conectar com o backend (porta 3000):', error);
-      // A rota de simulação responde com "erro"; o limite de pedidos e outros erros, com "message".
+    
       const msgServidor = error?.response?.data?.erro || error?.response?.data?.message;
 
       if (msgServidor) {
